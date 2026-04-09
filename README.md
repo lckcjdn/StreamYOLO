@@ -13,7 +13,11 @@
 - 新增 VisDrone 11 类类别表：`exps/data/visdrone_class.py`
 - 新增 VisDrone one-future 数据集：`exps/dataset/tal_flip_one_future_visdronedataset.py`
 - 新增 VisDrone 评估器：`exps/evaluators/onex_stream_evaluator_visdrone.py`
-- 新增 VisDrone 训练配置：`cfgs/visdrone_m_s50_onex_dfp_tal_flip.py`
+- 新增 VisDrone 训练配置：
+  - `cfgs/visdrone_s_s50_onex_dfp_tal_flip.py`
+  - `cfgs/visdrone_m_s50_onex_dfp_tal_flip.py`
+  - `cfgs/visdrone_l_s50_onex_dfp_tal_flip.py`
+- 新增 WSL/Linux 训练脚本：`scripts/train_visdrone.sh`
 - 新增 Conda 环境文件：`environment.yml`
 - 新增依赖清单：`requirements.txt`
 - 新增兼容别名文件：`requestment.txt`
@@ -123,10 +127,17 @@ pip install --no-deps https://github.com/Megvii-BaseDetection/YOLOX/archive/refs
 
 ## 训练
 
-使用新的 VisDrone 配置训练：
+直接训练 `m` 模型：
 
 ```powershell
 python tools/train.py -f cfgs/visdrone_m_s50_onex_dfp_tal_flip.py -d 1 -b 8 -c <your_yolox_m_checkpoint.pth> --fp16
+```
+
+如果你手头是 `YOLOX-s` 或 `YOLOX-l` 的 COCO 预训练权重，请改用对应配置：
+
+```powershell
+python tools/train.py -f cfgs/visdrone_s_s50_onex_dfp_tal_flip.py -d 1 -b 8 -c .\pretrained\yolox_s.pth --fp16
+python tools/train.py -f cfgs/visdrone_l_s50_onex_dfp_tal_flip.py -d 1 -b 4 -c .\pretrained\yolox_l.pth --fp16
 ```
 
 常用说明：
@@ -141,6 +152,39 @@ python tools/train.py -f cfgs/visdrone_m_s50_onex_dfp_tal_flip.py -d 1 -b 8 -c <
 ```text
 D:\SAR_Nir_dt\StreamYOLO\outputs\streamyolo_visdrone
 ```
+
+## WSL/Linux 训练脚本
+
+仓库内已经提供了一个 bash 脚本：
+
+```bash
+scripts/train_visdrone.sh
+```
+
+示例：
+
+```bash
+cd /mnt/d/SAR_Nir_dt/StreamYOLO
+chmod +x scripts/train_visdrone.sh
+
+MODEL_SIZE=s \
+BATCH_SIZE=8 \
+DEVICES=1 \
+NUM_WORKERS=4 \
+MAX_EPOCH=30 \
+./scripts/train_visdrone.sh
+```
+
+可用环境变量包括：
+
+- `MODEL_SIZE=s|m|l`
+- `CKPT=/path/to/yolox_*.pth`
+- `STREAMYOLO_VISDRONE_ROOT=/path/to/VisDrone_MOT_TransVOD`
+- `BATCH_SIZE`
+- `DEVICES`
+- `NUM_WORKERS`
+- `MAX_EPOCH`
+- `EXPERIMENT_NAME`
 
 ## 评估
 
