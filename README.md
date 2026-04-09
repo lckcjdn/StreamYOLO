@@ -1,146 +1,178 @@
-# StreamYOLO
+# StreamYOLO for VisDrone MOT
 
-## Real-time Object Detection for Streaming Perception
-<p align='left'>
-  <img src='assets/train.png' width='721'/>
-</p>
+这个仓库已经改成面向 `E:\VOD-dataset\VisDrone_MOT_TransVOD` 的 StreamYOLO one-future 训练版本，默认配置对齐环境 `E:\python\envs\TransVOD_py310_cu128` 的核心组合：
 
-[Jinrong Yang](https://scholar.google.com.hk/citations?user=8Of_NYQAAAAJ&hl=zh-CN), [Songtao Liu](https://scholar.google.com.hk/citations?hl=zh-CN&user=xY9qK1QAAAAJ), [Zeming Li](https://www.zemingli.com/), [Xiaoping Li](http://mse.hust.edu.cn/info/1143/1374.htm), [Sun Jian](http://www.jiansun.org/) <br>
-Real-time Object Detection for Streaming Perception, CVPR 2022 (Oral)<br>
-**[[Paper](https://openaccess.thecvf.com/content/CVPR2022/papers/Yang_Real-Time_Object_Detection_for_Streaming_Perception_CVPR_2022_paper.pdf)]** <br />
+- Python `3.10.18`
+- CUDA `12.8`
+- PyTorch `2.9.1+cu128`
+- TorchVision `0.24.1+cu128`
+- TorchAudio `2.9.1+cu128`
 
+## 这次改了什么
 
+- 新增 VisDrone 11 类类别表：`exps/data/visdrone_class.py`
+- 新增 VisDrone one-future 数据集：`exps/dataset/tal_flip_one_future_visdronedataset.py`
+- 新增 VisDrone 评估器：`exps/evaluators/onex_stream_evaluator_visdrone.py`
+- 新增 VisDrone 训练配置：`cfgs/visdrone_m_s50_onex_dfp_tal_flip.py`
+- 新增 Conda 环境文件：`environment.yml`
+- 新增依赖清单：`requirements.txt`
+- 新增兼容别名文件：`requestment.txt`
+- 在依赖里加入了 `conda-pack`，方便把训练环境整体打包迁移
 
-## Benchmark
+## 数据集假设
 
-|Model |size |velocity | sAP<br>0.5:0.95 | sAP50 |sAP75| weights | COCO pretrained weights |
-| ------        |:---: | :---:       |:---:     |:---:  | :---: | :----: | :----: |
-|[StreamYOLO-s](./cfgs/s_s50_onex_dfp_tal_flip.py)    |600×960  |1x      |29.8     |50.3 | 29.8 |[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/s_s50_one_x.pth) |[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/yolox_s.pth) |
-|[StreamYOLO-m](./cfgs/m_s50_onex_dfp_tal_flip.py)    |600×960  |1x      |33.7     |54.5 |34.0|[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/m_s50_one_x.pth) |[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/yolox_m.pth) |
-|[StreamYOLO-l](./cfgs/l_s50_onex_dfp_tal_flip.py)    |600×960  |1x  |36.9 |58.1| 37.5 |[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/l_s50_one_x.pth) |[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/yolox_l.pth) |
-|[StreamYOLO-l](./cfgs/l_s50_twox_dfp_tal_flip.py)   |600×960  |2x      | 34.6 |56.3|34.7 |[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/l_s50_two_x.pth) |[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/yolox_l.pth) |
-|[StreamYOLO-l](./cfgs/l_s50_still_dfp_flip.py)   |600×960  | still      | 39.4 |60.0 | 40.2 |[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/l_s50_still.pth) |[github](https://github.com/yancie-yjr/StreamYOLO/releases/download/0.1.0rc/yolox_l.pth) |
+当前实现直接复用你现有的 COCO 风格 JSON，不再依赖 Argoverse 的：
 
-## Quick Start
+- `seq_dirs`
+- `sid`
+- `fid`
+- `name`
+- `Argoverse-1.1/tracking/...` 路径拼接
 
-<details>
-<summary>Dataset preparation</summary>
+当前数据按照 `video_id + frame_id` 建立前一帧和目标帧关系：
 
-You can download Argoverse-1.1 full dataset and annotation from [HERE](https://www.cs.cmu.edu/~mengtial/proj/streaming/) and unzip it.
+- 支持帧：当前帧的前一帧，若是序列首帧则回退到当前帧
+- 目标帧：当前帧的后一帧，若是序列末帧则回退到当前帧
+- 评估时直接使用数据集返回的目标 `image_id`，不再写 Argoverse 专用跳过逻辑
 
-The folder structure should be organized as follows before our processing.
+你给的数据统计和这个实现是一致的：
 
-```shell
-StreamYOLO
-├── exps
-├── tools
-├── yolox
-├── data
-│   ├── Argoverse-1.1
-│   │   ├── annotations
-│   │       ├── tracking
-│   │           ├── train
-│   │           ├── val
-│   │           ├── test
-│   ├── Argoverse-HD
-│   │   ├── annotations
-│   │       ├── test-meta.json
-│   │       ├── train.json
-│   │       ├── val.json
+- 训练集 56 个视频
+- 24201 帧
+- 1105516 条标注
+- 11 个类别
+- 每个视频内部尺寸固定
+
+## 数据目录
+
+默认根目录是：
+
+```text
+E:\VOD-dataset\VisDrone_MOT_TransVOD
 ```
 
-The hash strings represent different video sequences in Argoverse, and `ring_front_center` is one of the sensors for that sequence. Argoverse-HD annotations correspond to images from this sensor. Information from other sensors (other ring cameras or LiDAR) is not used, but our framework can be also extended to these modalities or to a multi-modality setting.
+目录结构应为：
 
-
-</details>
-
-
-<details>
-<summary>Installation</summary>
-
-```shell
-# basic python libraries
-conda create --name streamyolo python=3.7
-
-pip install torch==1.7.1+cu110 torchvision==0.8.2+cu110 torchaudio==0.7.2 -f https://download.pytorch.org/whl/torch_stable.html
-
-pip3 install yolox==0.3
-git clone git@github.com:yancie-yjr/StreamYOLO.git
-
-cd StreamYOLO/
-
-# add StreamYOLO to PYTHONPATH and add this line to ~/.bashrc or ~/.zshrc (change the file accordingly)
-ADDPATH=$(pwd)
-echo export PYTHONPATH=$PYTHONPATH:$ADDPATH >> ~/.bashrc
-source ~/.bashrc
-
-# Installing `mmcv` for the official sAP evaluation:
-# Please replace `{cu_version}` and ``{torch_version}`` with the versions you are currently using.
-# You will get import or runtime errors if the versions are incorrect.
-pip install mmcv-full==1.1.5 -f https://download.openmmlab.com/mmcv/dist/{cu_version}/{torch_version}/index.html
-
+```text
+E:\VOD-dataset\VisDrone_MOT_TransVOD
+├─annotations
+│  ├─imagenet_vid_train.json
+│  ├─imagenet_vid_val.json
+│  ├─imagenet_vid_test.json
+│  └─imagenet_vid_train_joint_30.json
+└─Data
+   └─VID
+      ├─train
+      ├─valid
+      └─test
 ```
 
-</details>
+如果后续想换目录，不需要改代码，直接设置环境变量即可：
 
-
-<details>
-<summary>Reproduce our results on Argoverse-HD</summary>
-
-Step1. Prepare COCO dataset
-```shell
-cd <StreamYOLO_HOME>
-ln -s /path/to/your/Argoverse-1.1 ./data/Argoverse-1.1
-ln -s /path/to/your/Argoverse-HD ./data/Argoverse-HD
+```powershell
+$env:STREAMYOLO_VISDRONE_ROOT = 'E:\VOD-dataset\VisDrone_MOT_TransVOD'
 ```
 
-Step2. Reproduce our results on Argoverse:
+## Conda 环境
 
-```shell
-python tools/train.py -f cfgs/m_s50_onex_dfp_tal_flip.py -d 8 -b 32 -c [/path/to/your/coco_pretrained_path] -o --fp16
-```
-* -d: number of gpu devices.
-* -b: total batch size, the recommended number for -b is num-gpu * 8.
-* --fp16: mixed precision training.
-* -c: model checkpoint path.
+推荐在仓库内创建独立环境：
 
-</details>
-
-
-<details>
-<summary>Offline Evaluation</summary>
-
-We support batch testing for fast evaluation:
-
-```shell
-python tools/eval.py -f  cfgs/l_s50_onex_dfp_tal_flip.py -c [/path/to/your/model_path] -b 64 -d 8 --conf 0.01 [--fp16] [--fuse]
-```
-* --fuse: fuse conv and bn.
-* -d: number of GPUs used for evaluation. DEFAULT: All GPUs available will be used.
-* -b: total batch size across on all GPUs.
-* -c: model checkpoint path.
-* --conf: NMS threshold. If using 0.001, the performance will further improve by 0.2~0.3 sAP.
-
-</details>
-
-<details>
-<summary>Online Evaluation</summary>
-
-We modify the online evaluation from [sAP](https://github.com/mtli/sAP)
-
-Please use 1 V100 GPU to test the performance since other GPUs with low computing power will trigger non-real-time results!!!!!!!!
-
-```shell
-cd sAP/streamyolo
-bash streamyolo.sh
+```powershell
+cd D:\SAR_Nir_dt\StreamYOLO
+conda create -p .\.conda\streamyolo_visdrone_py310_cu128 python=3.10.18 pip=25.3 setuptools=80.9.0 wheel=0.45.1 -y
+conda activate D:\SAR_Nir_dt\StreamYOLO\.conda\streamyolo_visdrone_py310_cu128
+pip install -r requirements.txt
+pip install --no-deps https://github.com/Megvii-BaseDetection/YOLOX/archive/refs/tags/0.3.0.zip
 ```
 
-</details>
+然后把仓库加入 `PYTHONPATH`：
 
+```powershell
+$env:PYTHONPATH = "D:\SAR_Nir_dt\StreamYOLO;$env:PYTHONPATH"
+```
 
+如果你更想用名字而不是前缀路径，也可以：
+
+```powershell
+conda create -n streamyolo_visdrone_py310_cu128 python=3.10.18 pip=25.3 setuptools=80.9.0 wheel=0.45.1 -y
+conda activate streamyolo_visdrone_py310_cu128
+pip install -r requirements.txt
+pip install --no-deps https://github.com/Megvii-BaseDetection/YOLOX/archive/refs/tags/0.3.0.zip
+```
+
+## 依赖说明
+
+`requirements.txt` 分成两部分：
+
+- 和 `TransVOD_py310_cu128` 对齐的核心运行栈
+- StreamYOLO 额外需要的工具库：`loguru`、`tabulate`、`tensorboard`、`thop`、`ninja`、`psutil`
+
+`yolox` 建议单独安装：
+
+```powershell
+pip install --no-deps https://github.com/Megvii-BaseDetection/YOLOX/archive/refs/tags/0.3.0.zip
+```
+
+这样可以避开 `PyPI yolox==0.3.0` 在 Windows + Python 3.10 下继续拉起旧版 `onnx` 源码编译的问题。
+
+其中还额外加入了：
+
+- `conda-pack`
+
+它用于把 Conda 环境打包成可迁移压缩包。
+
+## 训练
+
+使用新的 VisDrone 配置训练：
+
+```powershell
+python tools/train.py -f cfgs/visdrone_m_s50_onex_dfp_tal_flip.py -d 1 -b 8 -c <your_yolox_m_checkpoint.pth> --fp16
+```
+
+常用说明：
+
+- `-d`：GPU 数量
+- `-b`：总 batch size
+- `-c`：预训练权重路径
+- `--fp16`：混合精度训练
+
+输出目录默认写到：
+
+```text
+D:\SAR_Nir_dt\StreamYOLO\outputs\streamyolo_visdrone
+```
+
+## 评估
+
+```powershell
+python tools/eval.py -f cfgs/visdrone_m_s50_onex_dfp_tal_flip.py -c <your_ckpt.pth> -d 1 -b 8 --conf 0.01 --fp16
+```
+
+## 打包环境
+
+环境安装完成后，可以直接打包：
+
+```powershell
+New-Item -ItemType Directory -Force -Path .\dist | Out-Null
+conda pack -p .\.conda\streamyolo_visdrone_py310_cu128 -o .\dist\streamyolo_visdrone_py310_cu128.zip --format zip
+```
+
+如果你使用的是命名环境：
+
+```powershell
+conda pack -n streamyolo_visdrone_py310_cu128 -o .\dist\streamyolo_visdrone_py310_cu128.zip --format zip
+```
+
+## 说明
+
+- 这个仓库仍然依赖外部 `yolox` 包，不是 vendor-in 仓库内部版本
+- 由于当前会话网络受限，我没有办法在这里直接把 `yolox` 从外网安装完成
+- 我已经把环境文件、依赖文件和数据集适配代码补齐了，后续只要在可联网或有内网镜像的环境里执行 `conda env create` 即可
 
 ## Citation
-Please cite the following paper if this repo helps your research:
+
+如果这份修改版仓库对你的工作有帮助，请同时引用原始 StreamYOLO 论文：
+
 ```bibtex
 @inproceedings{streamyolo,
   title={Real-time Object Detection for Streaming Perception},
@@ -149,14 +181,4 @@ Please cite the following paper if this repo helps your research:
   pages={5385--5395},
   year={2022}
 }
-@article{yang2022streamyolo,
-  title={StreamYOLO: Real-time Object Detection for Streaming Perception},
-  author={Yang, Jinrong and Liu, Songtao and Li, Zeming and Li, Xiaoping and Sun, Jian},
-  journal={arXiv preprint arXiv:2207.10433},
-  year={2022}
-}
 ```
-
-## License
-This repo is released under the Apache 2.0 license. Please see the LICENSE file for more information.
-

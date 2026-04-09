@@ -432,12 +432,6 @@ class TALHead(nn.Module):
         iou_loss_weight = (weight * iou_loss.sum()) / (weight * iou_loss).sum()
         iou_loss_weight = iou_loss_weight.detach()
 
-        l1_loss = self.l1_loss(origin_preds.view(-1, 4)[fg_masks], l1_targets)
-        l1_weight = weight.unsqueeze(1).repeat(1, 4)
-        l1_weight = (l1_weight * l1_loss.sum()) / (l1_weight * l1_loss).sum()
-        l1_weight = l1_weight.detach()
-
-
         num_fg = max(num_fg, 1)
         loss_iou = (
             iou_loss_weight * self.iou_loss(bbox_preds.view(-1, 4)[fg_masks], reg_targets)
@@ -451,6 +445,10 @@ class TALHead(nn.Module):
             )
         ).sum() / num_fg
         if self.use_l1:
+            l1_loss = self.l1_loss(origin_preds.view(-1, 4)[fg_masks], l1_targets)
+            l1_weight = weight.unsqueeze(1).repeat(1, 4)
+            l1_weight = (l1_weight * l1_loss.sum()) / (l1_weight * l1_loss).sum()
+            l1_weight = l1_weight.detach()
             loss_l1 = (
                 l1_weight * self.l1_loss(origin_preds.view(-1, 4)[fg_masks], l1_targets)
             ).sum() / num_fg
