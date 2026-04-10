@@ -7,6 +7,7 @@ import numpy as np
 
 from yolox.utils import adjust_box_anns
 
+import math
 import random
 
 from yolox.data.datasets.datasets_wrapper import Dataset
@@ -35,40 +36,47 @@ def random_perspective(
     shear=10,
     perspective=0.0,
     border=(0, 0),
+    matrix=None,
+    scale_value=None,
+    return_transform=False,
 ):
     # targets = [cls, xyxy]
     height = img.shape[0] + border[0] * 2  # shape(h,w,c)
     width = img.shape[1] + border[1] * 2
 
-    # Center
-    C = np.eye(3)
-    C[0, 2] = -img.shape[1] / 2  # x translation (pixels)
-    C[1, 2] = -img.shape[0] / 2  # y translation (pixels)
+    if matrix is None:
+        # Center
+        C = np.eye(3)
+        C[0, 2] = -img.shape[1] / 2  # x translation (pixels)
+        C[1, 2] = -img.shape[0] / 2  # y translation (pixels)
 
-    # Rotation and Scale
-    R = np.eye(3)
-    a = random.uniform(-degrees, degrees)
-    # a += random.choice([-180, -90, 0, 90])  # add 90deg rotations to small rotations
-    s = random.uniform(scale[0], scale[1])
-    # s = 2 ** random.uniform(-scale, scale)
-    R[:2] = cv2.getRotationMatrix2D(angle=a, center=(0, 0), scale=s)
+        # Rotation and Scale
+        R = np.eye(3)
+        a = random.uniform(-degrees, degrees)
+        # a += random.choice([-180, -90, 0, 90])  # add 90deg rotations to small rotations
+        s = random.uniform(scale[0], scale[1])
+        # s = 2 ** random.uniform(-scale, scale)
+        R[:2] = cv2.getRotationMatrix2D(angle=a, center=(0, 0), scale=s)
 
-    # Shear
-    S = np.eye(3)
-    S[0, 1] = math.tan(random.uniform(-shear, shear) * math.pi / 180)  # x shear (deg)
-    S[1, 0] = math.tan(random.uniform(-shear, shear) * math.pi / 180)  # y shear (deg)
+        # Shear
+        S = np.eye(3)
+        S[0, 1] = math.tan(random.uniform(-shear, shear) * math.pi / 180)  # x shear (deg)
+        S[1, 0] = math.tan(random.uniform(-shear, shear) * math.pi / 180)  # y shear (deg)
 
-    # Translation
-    T = np.eye(3)
-    T[0, 2] = (
-        random.uniform(0.5 - translate, 0.5 + translate) * width
-    )  # x translation (pixels)
-    T[1, 2] = (
-        random.uniform(0.5 - translate, 0.5 + translate) * height
-    )  # y translation (pixels)
+        # Translation
+        T = np.eye(3)
+        T[0, 2] = (
+            random.uniform(0.5 - translate, 0.5 + translate) * width
+        )  # x translation (pixels)
+        T[1, 2] = (
+            random.uniform(0.5 - translate, 0.5 + translate) * height
+        )  # y translation (pixels)
 
-    # Combined rotation matrix
-    M = T @ S @ R @ C  # order of operations (right to left) is IMPORTANT
+        # Combined rotation matrix
+        M = T @ S @ R @ C  # order of operations (right to left) is IMPORTANT
+    else:
+        M = matrix
+        s = 1.0 if scale_value is None else scale_value
 
     ###########################
     # For Aug out of Mosaic
@@ -113,6 +121,9 @@ def random_perspective(
         i = box_candidates(box1=targets[:, :4].T * s, box2=xy.T)
         targets = targets[i]
         targets[:, :4] = xy[i]
+
+    if return_transform:
+        return img, targets, M, s
 
     return img, targets
 
@@ -179,9 +190,272 @@ class MosaicDetection(Dataset):
     def __len__(self):
         return len(self._dataset)
 
+    @staticmethod
+    def _resize_mosaic_image(img, input_h, input_w):
+        h0, w0 = img.shape[:2]
+        scale = min(1.0 * input_h / h0, 1.0 * input_w / w0)
+        resized = cv2.resize(
+            img, (int(w0 * scale), int(h0 * scale)), interpolation=cv2.INTER_LINEAR
+        )
+        return resized, scale
+
+    @staticmethod
+    def _offset_labels(labels, scale, padw, padh):
+        labels = labels.copy()
+        if labels.size > 0:
+            labels[:, 0] = scale * labels[:, 0] + padw
+            labels[:, 1] = scale * labels[:, 1] + padh
+            labels[:, 2] = scale * labels[:, 2] + padw
+            labels[:, 3] = scale * labels[:, 3] + padh
+        return labels
+
+    @staticmethod
+    def _concat_and_clip_labels(label_sets, input_h, input_w):
+        if len(label_sets):
+            labels = np.concatenate(label_sets, 0)
+            np.clip(labels[:, 0], 0, 2 * input_w, out=labels[:, 0])
+            np.clip(labels[:, 1], 0, 2 * input_h, out=labels[:, 1])
+            np.clip(labels[:, 2], 0, 2 * input_w, out=labels[:, 2])
+            np.clip(labels[:, 3], 0, 2 * input_h, out=labels[:, 3])
+            return labels
+        return np.zeros((0, 5), dtype=np.float32)
+
+    @staticmethod
+    def _prepare_mixup_image(img, input_dim, jit_factor, flip):
+        if len(img.shape) == 3:
+            cp_img = np.ones((input_dim[0], input_dim[1], 3), dtype=np.uint8) * 114
+        else:
+            cp_img = np.ones(input_dim, dtype=np.uint8) * 114
+
+        cp_scale_ratio = min(input_dim[0] / img.shape[0], input_dim[1] / img.shape[1])
+        resized_img = cv2.resize(
+            img,
+            (int(img.shape[1] * cp_scale_ratio), int(img.shape[0] * cp_scale_ratio)),
+            interpolation=cv2.INTER_LINEAR,
+        )
+
+        cp_img[
+            : int(img.shape[0] * cp_scale_ratio), : int(img.shape[1] * cp_scale_ratio)
+        ] = resized_img
+        cp_img = cv2.resize(
+            cp_img,
+            (int(cp_img.shape[1] * jit_factor), int(cp_img.shape[0] * jit_factor)),
+        )
+        cp_scale_ratio *= jit_factor
+
+        if flip:
+            cp_img = cp_img[:, ::-1, :]
+
+        return cp_img, cp_scale_ratio
+
+    @staticmethod
+    def _transform_mixup_boxes(labels, cp_scale_ratio, origin_w, origin_h, target_w, target_h, x_offset, y_offset, flip):
+        if len(labels) == 0:
+            return np.zeros((0, 4), dtype=np.float32), np.zeros((0,), dtype=bool)
+
+        boxes_origin = adjust_box_anns(
+            labels[:, :4].copy(), cp_scale_ratio, 0, 0, origin_w, origin_h
+        )
+        if flip:
+            boxes_origin[:, 0::2] = origin_w - boxes_origin[:, 0::2][:, ::-1]
+
+        boxes_transformed = boxes_origin.copy()
+        boxes_transformed[:, 0::2] = np.clip(
+            boxes_transformed[:, 0::2] - x_offset, 0, target_w
+        )
+        boxes_transformed[:, 1::2] = np.clip(
+            boxes_transformed[:, 1::2] - y_offset, 0, target_h
+        )
+        keep_list = box_candidates(boxes_origin.T, boxes_transformed.T, 5)
+        return boxes_transformed, keep_list
+
+    def _mixup_pair(self, origin_img, origin_support_img, origin_labels, origin_support_labels, input_dim):
+        jit_factor = random.uniform(*self.mixup_scale)
+        flip = random.uniform(0, 1) > 0.5
+
+        cp_labels = []
+        cp_support_labels = []
+        while len(cp_labels) == 0 and len(cp_support_labels) == 0:
+            cp_index = random.randint(0, self.__len__() - 1)
+            _, _, cp_labels, cp_support_labels, _, _ = self._dataset.pull_item(cp_index)
+
+        img, support_img, cp_labels, cp_support_labels, _, _ = self._dataset.pull_item(cp_index)
+        cp_img, cp_scale_ratio = self._prepare_mixup_image(img, input_dim, jit_factor, flip)
+        cp_support_img, cp_support_scale_ratio = self._prepare_mixup_image(
+            support_img, input_dim, jit_factor, flip
+        )
+
+        origin_h, origin_w = cp_img.shape[:2]
+        target_h, target_w = origin_img.shape[:2]
+        padded_img = np.zeros(
+            (max(origin_h, target_h), max(origin_w, target_w), 3), dtype=np.uint8
+        )
+        padded_support_img = np.zeros_like(padded_img)
+        padded_img[:origin_h, :origin_w] = cp_img
+        padded_support_img[: cp_support_img.shape[0], : cp_support_img.shape[1]] = cp_support_img
+
+        x_offset, y_offset = 0, 0
+        if padded_img.shape[0] > target_h:
+            y_offset = random.randint(0, padded_img.shape[0] - target_h - 1)
+        if padded_img.shape[1] > target_w:
+            x_offset = random.randint(0, padded_img.shape[1] - target_w - 1)
+
+        padded_cropped_img = padded_img[
+            y_offset: y_offset + target_h, x_offset: x_offset + target_w
+        ]
+        padded_cropped_support_img = padded_support_img[
+            y_offset: y_offset + target_h, x_offset: x_offset + target_w
+        ]
+
+        cp_boxes, keep_list = self._transform_mixup_boxes(
+            cp_labels,
+            cp_scale_ratio,
+            origin_w,
+            origin_h,
+            target_w,
+            target_h,
+            x_offset,
+            y_offset,
+            flip,
+        )
+        cp_support_boxes, keep_support_list = self._transform_mixup_boxes(
+            cp_support_labels,
+            cp_support_scale_ratio,
+            cp_support_img.shape[1],
+            cp_support_img.shape[0],
+            target_w,
+            target_h,
+            x_offset,
+            y_offset,
+            flip,
+        )
+
+        should_blend = keep_list.sum() >= 1.0 or keep_support_list.sum() >= 1.0
+        if should_blend:
+            if keep_list.sum() >= 1.0:
+                cls_labels = cp_labels[keep_list, 4:5].copy()
+                box_labels = cp_boxes[keep_list]
+                labels = np.hstack((box_labels, cls_labels))
+                origin_labels = np.vstack((origin_labels, labels))
+
+            if keep_support_list.sum() >= 1.0:
+                cls_labels = cp_support_labels[keep_support_list, 4:5].copy()
+                box_labels = cp_support_boxes[keep_support_list]
+                labels = np.hstack((box_labels, cls_labels))
+                origin_support_labels = np.vstack((origin_support_labels, labels))
+
+            origin_img = 0.5 * origin_img.astype(np.float32) + 0.5 * padded_cropped_img.astype(np.float32)
+            origin_support_img = (
+                0.5 * origin_support_img.astype(np.float32)
+                + 0.5 * padded_cropped_support_img.astype(np.float32)
+            )
+
+        return (
+            origin_img.astype(np.uint8),
+            origin_support_img.astype(np.uint8),
+            origin_labels,
+            origin_support_labels,
+        )
+
     @Dataset.mosaic_getitem
     def __getitem__(self, idx):
         if self.enable_mosaic and random.random() < self.mosaic_prob:
+            sample = self._dataset.pull_item(idx)
+            if len(sample) == 6:
+                mosaic_labels = []
+                support_mosaic_labels = []
+                input_dim = self._dataset.input_dim
+                input_h, input_w = input_dim[0], input_dim[1]
+
+                yc = int(random.uniform(0.5 * input_h, 1.5 * input_h))
+                xc = int(random.uniform(0.5 * input_w, 1.5 * input_w))
+
+                indices = [idx] + [random.randint(0, len(self._dataset) - 1) for _ in range(3)]
+                sample_id = sample[5]
+
+                for i_mosaic, index in enumerate(indices):
+                    img, support_img, labels, support_labels, _, id_ = self._dataset.pull_item(index)
+                    img, scale = self._resize_mosaic_image(img, input_h, input_w)
+                    support_img, _ = self._resize_mosaic_image(support_img, input_h, input_w)
+                    h, w, c = img.shape[:3]
+                    if i_mosaic == 0:
+                        mosaic_img = np.full((input_h * 2, input_w * 2, c), 114, dtype=np.uint8)
+                        support_mosaic_img = np.full_like(mosaic_img, 114)
+                        sample_id = id_
+
+                    (l_x1, l_y1, l_x2, l_y2), (s_x1, s_y1, s_x2, s_y2) = get_mosaic_coordinate(
+                        mosaic_img, i_mosaic, xc, yc, w, h, input_h, input_w
+                    )
+
+                    mosaic_img[l_y1:l_y2, l_x1:l_x2] = img[s_y1:s_y2, s_x1:s_x2]
+                    support_mosaic_img[l_y1:l_y2, l_x1:l_x2] = support_img[s_y1:s_y2, s_x1:s_x2]
+                    padw, padh = l_x1 - s_x1, l_y1 - s_y1
+
+                    mosaic_labels.append(self._offset_labels(labels, scale, padw, padh))
+                    support_mosaic_labels.append(
+                        self._offset_labels(support_labels, scale, padw, padh)
+                    )
+
+                mosaic_labels = self._concat_and_clip_labels(mosaic_labels, input_h, input_w)
+                support_mosaic_labels = self._concat_and_clip_labels(
+                    support_mosaic_labels, input_h, input_w
+                )
+
+                mosaic_img, mosaic_labels, matrix, scale_value = random_perspective(
+                    mosaic_img,
+                    mosaic_labels,
+                    degrees=self.degrees,
+                    translate=self.translate,
+                    scale=self.scale,
+                    shear=self.shear,
+                    perspective=self.perspective,
+                    border=[-input_h // 2, -input_w // 2],
+                    return_transform=True,
+                )
+                support_mosaic_img, support_mosaic_labels = random_perspective(
+                    support_mosaic_img,
+                    support_mosaic_labels,
+                    degrees=self.degrees,
+                    translate=self.translate,
+                    scale=self.scale,
+                    shear=self.shear,
+                    perspective=self.perspective,
+                    border=[-input_h // 2, -input_w // 2],
+                    matrix=matrix,
+                    scale_value=scale_value,
+                )
+
+                if (
+                    self.enable_mixup
+                    and (len(mosaic_labels) != 0 or len(support_mosaic_labels) != 0)
+                    and random.random() < self.mixup_prob
+                ):
+                    (
+                        mosaic_img,
+                        support_mosaic_img,
+                        mosaic_labels,
+                        support_mosaic_labels,
+                    ) = self._mixup_pair(
+                        mosaic_img,
+                        support_mosaic_img,
+                        mosaic_labels,
+                        support_mosaic_labels,
+                        self.input_dim,
+                    )
+
+                mix_img, support_mix_img, padded_labels, padded_support_labels = self.preproc(
+                    (mosaic_img, support_mosaic_img),
+                    (mosaic_labels, support_mosaic_labels),
+                    self.input_dim,
+                )
+                img_info = (mix_img.shape[1], mix_img.shape[0])
+                return (
+                    np.concatenate((mix_img, support_mix_img), axis=0),
+                    (padded_labels, padded_support_labels),
+                    img_info,
+                    sample_id,
+                )
+
             mosaic_labels = []
             input_dim = self._dataset.input_dim
             input_h, input_w = input_dim[0], input_dim[1]
