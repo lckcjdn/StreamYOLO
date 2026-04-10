@@ -3,12 +3,20 @@
 # Copyright (c) Megvii, Inc. and its affiliates.
 
 import argparse
+import os
 import random
+import sys
 import warnings
 from loguru import logger
 
 import torch
 import torch.backends.cudnn as cudnn
+
+# Make sibling imports like `from exps...` work when launched as
+# `python tools/train.py ...` without requiring a manual PYTHONPATH export.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from yolox.core import launch
 from yolox.exp import Exp, get_exp

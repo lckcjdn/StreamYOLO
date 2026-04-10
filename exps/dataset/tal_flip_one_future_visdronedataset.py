@@ -43,7 +43,8 @@ class ONE_VISDRONEDataset(Dataset):
         return len(self.ids)
 
     def __del__(self):
-        if self.imgs:
+        imgs = getattr(self, "imgs", None)
+        if imgs is not None:
             del self.imgs
 
     def _build_sequence_links(self):

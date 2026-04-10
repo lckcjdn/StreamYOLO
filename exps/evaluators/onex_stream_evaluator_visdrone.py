@@ -199,10 +199,16 @@ class ONEX_VISDRONEEvaluator:
 
         try:
             from yolox.layers import COCOeval_opt as COCOeval
-        except ImportError:
+
+            coco_eval = COCOeval(coco_gt, coco_dt, "bbox")
+        except Exception as exc:
+            logger.warning(
+                "Falling back to pycocotools COCOeval because optimized COCOeval is unavailable: {}",
+                exc,
+            )
             from pycocotools.cocoeval import COCOeval
 
-        coco_eval = COCOeval(coco_gt, coco_dt, "bbox")
+            coco_eval = COCOeval(coco_gt, coco_dt, "bbox")
         coco_eval.evaluate()
         coco_eval.accumulate()
 

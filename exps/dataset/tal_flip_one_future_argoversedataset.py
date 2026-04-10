@@ -52,7 +52,8 @@ class ONE_ARGOVERSEDataset(Dataset):
         return len(self.ids)
 
     def __del__(self):
-        if self.imgs:
+        imgs = getattr(self, "imgs", None)
+        if imgs is not None:
             del self.imgs
 
     def _load_coco_annotations(self):

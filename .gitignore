@@ -214,6 +214,7 @@ docs/api
 *.onnx
 *.engine
 events.out.tfevents*
+tmp/
 
 # vscode
 *.code-workspace
