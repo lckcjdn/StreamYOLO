@@ -168,7 +168,7 @@ class Exp(MyExp):
             targets[0][..., 2::2] = targets[0][..., 2::2] * scale_y
             targets[1][..., 1::2] = targets[1][..., 1::2] * scale_x
             targets[1][..., 2::2] = targets[1][..., 2::2] * scale_y
-        return inputs, targets
+        return inputs, (targets[0], targets[1], targets[2], targets[3])
 
     def get_evaluator(self, batch_size, is_distributed, testdev=False):
         from exps.evaluators.onex_stream_evaluator_visdrone import ONEX_VISDRONEEvaluator

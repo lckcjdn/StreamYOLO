@@ -286,6 +286,8 @@ class TALHead(nn.Module):
         else:
             label_cut = labels[0]
             support_label = labels[1]
+        target_track_ids = labels[2] if len(labels) > 2 else None
+        support_track_ids = labels[3] if len(labels) > 3 else None
         nlabel = (label_cut.sum(dim=2) > 0).sum(dim=1)  # number of objects
         support_nlabel = (support_label.sum(dim=2) > 0).sum(dim=1)  # number of objects
 
@@ -321,6 +323,14 @@ class TALHead(nn.Module):
                 gt_bboxes_per_image = labels[0][batch_idx, :num_gt, 1:5]
                 support_gt_bboxes_per_image = labels[1][batch_idx, :support_num_gt, 1:5]
                 gt_classes = labels[0][batch_idx, :num_gt, 0]
+                gt_track_ids_per_image = (
+                    target_track_ids[batch_idx, :num_gt, 0] if target_track_ids is not None else None
+                )
+                support_track_ids_per_image = (
+                    support_track_ids[batch_idx, :support_num_gt, 0]
+                    if support_track_ids is not None
+                    else None
+                )
                 bboxes_preds_per_image = bbox_preds[batch_idx]
 
                 try:
@@ -399,13 +409,14 @@ class TALHead(nn.Module):
                     ious = torch.ones((num_gt, 1)).cuda()
                     ious_target = ious[matched_gt_inds]
                 else:
-                    pair_iou_between_current_and_support = bboxes_iou(gt_bboxes_per_image,
-                                                                  support_gt_bboxes_per_image, False)
-
-                    ious, support_id = torch.max(pair_iou_between_current_and_support, dim=1)
+                    ious = self.get_temporal_ious(
+                        gt_bboxes_per_image,
+                        gt_track_ids_per_image,
+                        support_gt_bboxes_per_image,
+                        support_track_ids_per_image,
+                    )
                     filter_id = (ious < self.ignore_thr)
                     ious[filter_id] = self.ignore_value
-
 
                     ious_target = ious[matched_gt_inds].unsqueeze(1)
 
@@ -470,6 +481,47 @@ class TALHead(nn.Module):
             loss_l1,
             num_fg / max(num_gts, 1),
         )
+
+    def get_temporal_ious(
+        self,
+        gt_bboxes_per_image,
+        gt_track_ids_per_image,
+        support_gt_bboxes_per_image,
+        support_track_ids_per_image,
+    ):
+        if support_gt_bboxes_per_image.numel() == 0:
+            return torch.ones((gt_bboxes_per_image.shape[0],), device=gt_bboxes_per_image.device)
+
+        fallback_pair_iou = None
+        temporal_ious = []
+        support_track_ids_per_image = (
+            support_track_ids_per_image.long() if support_track_ids_per_image is not None else None
+        )
+
+        for gt_index in range(gt_bboxes_per_image.shape[0]):
+            matched_iou = None
+            if gt_track_ids_per_image is not None and support_track_ids_per_image is not None:
+                gt_track_id = int(gt_track_ids_per_image[gt_index].item())
+                if gt_track_id >= 0:
+                    matched_support_mask = support_track_ids_per_image == gt_track_id
+                    if matched_support_mask.any():
+                        track_pair_iou = bboxes_iou(
+                            gt_bboxes_per_image[gt_index : gt_index + 1],
+                            support_gt_bboxes_per_image[matched_support_mask],
+                            False,
+                        )
+                        matched_iou = track_pair_iou.max()
+
+            if matched_iou is None:
+                if fallback_pair_iou is None:
+                    fallback_pair_iou = bboxes_iou(
+                        gt_bboxes_per_image, support_gt_bboxes_per_image, False
+                    )
+                matched_iou = fallback_pair_iou[gt_index].max()
+
+            temporal_ious.append(matched_iou)
+
+        return torch.stack(temporal_ious, dim=0)
 
     def get_l1_target(self, l1_target, gt, stride, x_shifts, y_shifts, eps=1e-8):
         l1_target[:, 0] = gt[:, 0] / stride - x_shifts

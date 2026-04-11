@@ -176,16 +176,22 @@ class TrainTransform:
     def __call__(self, image, targets, input_dim, mirror=False):
         boxes = targets[:, :4].copy()
         labels = targets[:, 4].copy()
+        if targets.shape[1] > 5:
+            track_ids = targets[:, 5].copy()
+        else:
+            track_ids = np.full((len(targets),), -1, dtype=np.int64)
         if len(boxes) == 0:
             targets = np.zeros((self.max_labels, 5), dtype=np.float32)
+            padded_track_ids = np.full((self.max_labels, 1), -1, dtype=np.int64)
             image, r_o = preproc(image, input_dim)
-            return image, targets
+            return image, targets, padded_track_ids
 
         image_o = image.copy()
         targets_o = targets.copy()
         height_o, width_o, _ = image_o.shape
         boxes_o = targets_o[:, :4]
         labels_o = targets_o[:, 4]
+        track_ids_o = track_ids.copy()
         # bbox_o: [xyxy] to [c_x,c_y,w,h]
         boxes_o = xyxy2cxcywh(boxes_o)
 
@@ -204,14 +210,17 @@ class TrainTransform:
         mask_b = np.minimum(boxes[:, 2], boxes[:, 3]) > 1
         boxes_t = boxes[mask_b]
         labels_t = labels[mask_b]
+        track_ids_t = track_ids[mask_b]
 
         if len(boxes_t) == 0:
             image_t, r_o = preproc(image_o, input_dim)
             boxes_o *= r_o
             boxes_t = boxes_o
             labels_t = labels_o
+            track_ids_t = track_ids_o
 
         labels_t = np.expand_dims(labels_t, 1)
+        track_ids_t = np.expand_dims(track_ids_t, 1)
 
         targets_t = np.hstack((labels_t, boxes_t))
         padded_labels = np.zeros((self.max_labels, 5))
@@ -219,7 +228,12 @@ class TrainTransform:
             : self.max_labels
         ]
         padded_labels = np.ascontiguousarray(padded_labels, dtype=np.float32)
-        return image_t, padded_labels
+        padded_track_ids = np.full((self.max_labels, 1), -1, dtype=np.int64)
+        padded_track_ids[range(len(track_ids_t))[: self.max_labels]] = track_ids_t[
+            : self.max_labels
+        ]
+        padded_track_ids = np.ascontiguousarray(padded_track_ids, dtype=np.int64)
+        return image_t, padded_labels, padded_track_ids
 
 class DoubleTrainTransform:
     def __init__(self, max_labels=50, hsv=True, flip=True):
@@ -229,9 +243,9 @@ class DoubleTrainTransform:
 
     def __call__(self, image, targets, input_dim):
         a = random.randrange(2)
-        img1, label1 = self.trasform1(image[0], targets[0], input_dim, mirror=a)
-        img2, label2 = self.trasform2(image[1], targets[1], input_dim, mirror=a)
-        return img1, img2, label1, label2
+        img1, label1, track1 = self.trasform1(image[0], targets[0], input_dim, mirror=a)
+        img2, label2, track2 = self.trasform2(image[1], targets[1], input_dim, mirror=a)
+        return img1, img2, label1, label2, track1, track2
 
 
 
@@ -260,7 +274,7 @@ class ValTransform:
     # assume input is cv2 img for now
     def __call__(self, img, res, input_size):
         img, _ = preproc(img, input_size, self.swap)
-        return img, np.zeros((1, 5))
+        return img, np.zeros((1, 5), dtype=np.float32), np.full((1, 1), -1, dtype=np.int64)
 
 
 
@@ -270,6 +284,6 @@ class DoubleValTransform:
         self.trasform2 = ValTransform(swap=swap)
 
     def __call__(self, img, res, input_size):
-        img1, label1 = self.trasform1(img[0], res[0], input_size)
-        img2, label2 = self.trasform2(img[1], res[1], input_size)
-        return img1, img2, label1, label2
+        img1, label1, track1 = self.trasform1(img[0], res[0], input_size)
+        img2, label2, track2 = self.trasform2(img[1], res[1], input_size)
+        return img1, img2, label1, label2, track1, track2

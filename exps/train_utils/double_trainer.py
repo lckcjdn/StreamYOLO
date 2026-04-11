@@ -97,9 +97,12 @@ class Trainer:
 
         inps, targets = self.prefetcher.next()
         inps = inps.to(self.data_type)
-        # targets = targets.to(self.data_type)
-        # targets.requires_grad = False
-        targets = (targets[0].to(self.data_type), targets[1].to(self.data_type))
+        targets = (
+            targets[0].to(self.data_type),
+            targets[1].to(self.data_type),
+            targets[2].to(torch.int64),
+            targets[3].to(torch.int64),
+        )
         targets[0].requires_grad = False
         targets[1].requires_grad = False
         inps, targets = self.exp.preprocess(inps, targets, self.input_size)

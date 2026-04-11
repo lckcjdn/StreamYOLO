@@ -86,11 +86,12 @@ class ONE_VISDRONEDataset(Dataset):
                 obj["clean_bbox"] = [x1, y1, x2, y2]
                 objs.append(obj)
 
-        res = np.zeros((len(objs), 5), dtype=np.float32)
+        res = np.zeros((len(objs), 6), dtype=np.float32)
         for index, obj in enumerate(objs):
             cls = self.class_ids.index(obj["category_id"])
             res[index, 0:4] = obj["clean_bbox"]
             res[index, 4] = cls
+            res[index, 5] = float(obj.get("track_id", -1))
 
         resize_ratio = min(self.img_size[0] / height, self.img_size[1] / width)
         res[:, :4] *= resize_ratio
@@ -173,8 +174,23 @@ class ONE_VISDRONEDataset(Dataset):
         img, support_img, target, support_target, img_info, img_id = self.pull_item(index)
 
         if self.preproc is not None:
-            img, support_img, target, support_target = self.preproc(
-                (img, support_img), (target, support_target), self.input_dim
-            )
+            (
+                img,
+                support_img,
+                target,
+                support_target,
+                target_track_ids,
+                support_track_ids,
+            ) = self.preproc((img, support_img), (target, support_target), self.input_dim)
+        else:
+            target_track_ids = target[:, 5:6].copy()
+            support_track_ids = support_target[:, 5:6].copy()
+            target = target[:, :5].copy()
+            support_target = support_target[:, :5].copy()
 
-        return np.concatenate((img, support_img), axis=0), (target, support_target), img_info, img_id
+        return (
+            np.concatenate((img, support_img), axis=0),
+            (target, support_target, target_track_ids, support_track_ids),
+            img_info,
+            img_id,
+        )

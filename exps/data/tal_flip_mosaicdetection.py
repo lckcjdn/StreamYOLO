@@ -210,7 +210,7 @@ class MosaicDetection(Dataset):
         return labels
 
     @staticmethod
-    def _concat_and_clip_labels(label_sets, input_h, input_w):
+    def _concat_and_clip_labels(label_sets, input_h, input_w, num_cols=5):
         if len(label_sets):
             labels = np.concatenate(label_sets, 0)
             np.clip(labels[:, 0], 0, 2 * input_w, out=labels[:, 0])
@@ -218,7 +218,7 @@ class MosaicDetection(Dataset):
             np.clip(labels[:, 2], 0, 2 * input_w, out=labels[:, 2])
             np.clip(labels[:, 3], 0, 2 * input_h, out=labels[:, 3])
             return labels
-        return np.zeros((0, 5), dtype=np.float32)
+        return np.zeros((0, num_cols), dtype=np.float32)
 
     @staticmethod
     def _prepare_mixup_image(img, input_dim, jit_factor, flip):
@@ -333,15 +333,15 @@ class MosaicDetection(Dataset):
         should_blend = keep_list.sum() >= 1.0 or keep_support_list.sum() >= 1.0
         if should_blend:
             if keep_list.sum() >= 1.0:
-                cls_labels = cp_labels[keep_list, 4:5].copy()
+                extra_labels = cp_labels[keep_list, 4:].copy()
                 box_labels = cp_boxes[keep_list]
-                labels = np.hstack((box_labels, cls_labels))
+                labels = np.hstack((box_labels, extra_labels))
                 origin_labels = np.vstack((origin_labels, labels))
 
             if keep_support_list.sum() >= 1.0:
-                cls_labels = cp_support_labels[keep_support_list, 4:5].copy()
+                extra_labels = cp_support_labels[keep_support_list, 4:].copy()
                 box_labels = cp_support_boxes[keep_support_list]
-                labels = np.hstack((box_labels, cls_labels))
+                labels = np.hstack((box_labels, extra_labels))
                 origin_support_labels = np.vstack((origin_support_labels, labels))
 
             origin_img = 0.5 * origin_img.astype(np.float32) + 0.5 * padded_cropped_img.astype(np.float32)
@@ -396,9 +396,11 @@ class MosaicDetection(Dataset):
                         self._offset_labels(support_labels, scale, padw, padh)
                     )
 
-                mosaic_labels = self._concat_and_clip_labels(mosaic_labels, input_h, input_w)
+                mosaic_labels = self._concat_and_clip_labels(
+                    mosaic_labels, input_h, input_w, num_cols=6
+                )
                 support_mosaic_labels = self._concat_and_clip_labels(
-                    support_mosaic_labels, input_h, input_w
+                    support_mosaic_labels, input_h, input_w, num_cols=6
                 )
 
                 mosaic_img, mosaic_labels, matrix, scale_value = random_perspective(
@@ -443,7 +445,14 @@ class MosaicDetection(Dataset):
                         self.input_dim,
                     )
 
-                mix_img, support_mix_img, padded_labels, padded_support_labels = self.preproc(
+                (
+                    mix_img,
+                    support_mix_img,
+                    padded_labels,
+                    padded_support_labels,
+                    padded_track_ids,
+                    padded_support_track_ids,
+                ) = self.preproc(
                     (mosaic_img, support_mosaic_img),
                     (mosaic_labels, support_mosaic_labels),
                     self.input_dim,
@@ -451,7 +460,12 @@ class MosaicDetection(Dataset):
                 img_info = (mix_img.shape[1], mix_img.shape[0])
                 return (
                     np.concatenate((mix_img, support_mix_img), axis=0),
-                    (padded_labels, padded_support_labels),
+                    (
+                        padded_labels,
+                        padded_support_labels,
+                        padded_track_ids,
+                        padded_support_track_ids,
+                    ),
                     img_info,
                     sample_id,
                 )
@@ -527,8 +541,20 @@ class MosaicDetection(Dataset):
         else:
             self._dataset._input_dim = self.input_dim
             img, support_img, label, support_label, img_info, id_ = self._dataset.pull_item(idx)
-            img, support_img, label, support_label = self.preproc((img, support_img), (label, support_label), self.input_dim)
-            return np.concatenate((img, support_img), axis=0), (label, support_label), img_info, id_
+            (
+                img,
+                support_img,
+                label,
+                support_label,
+                track_ids,
+                support_track_ids,
+            ) = self.preproc((img, support_img), (label, support_label), self.input_dim)
+            return (
+                np.concatenate((img, support_img), axis=0),
+                (label, support_label, track_ids, support_track_ids),
+                img_info,
+                id_,
+            )
 
     def mixup(self, origin_img, origin_labels, input_dim):
         jit_factor = random.uniform(*self.mixup_scale)
@@ -597,9 +623,9 @@ class MosaicDetection(Dataset):
         keep_list = box_candidates(cp_bboxes_origin_np.T, cp_bboxes_transformed_np.T, 5)
 
         if keep_list.sum() >= 1.0:
-            cls_labels = cp_labels[keep_list, 4:5].copy()
+            extra_labels = cp_labels[keep_list, 4:].copy()
             box_labels = cp_bboxes_transformed_np[keep_list]
-            labels = np.hstack((box_labels, cls_labels))
+            labels = np.hstack((box_labels, extra_labels))
             origin_labels = np.vstack((origin_labels, labels))
             origin_img = origin_img.astype(np.float32)
             origin_img = 0.5 * origin_img + 0.5 * padded_cropped_img.astype(np.float32)

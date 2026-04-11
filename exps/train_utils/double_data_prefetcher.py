@@ -30,8 +30,9 @@ class DataPrefetcher:
 
         with torch.cuda.stream(self.stream):
             self.input_cuda()
-            self.next_target = (self.next_target[0].cuda(non_blocking=True), self.next_target[1].cuda(non_blocking=True))
-            # self.next_target = self.next_target.cuda(non_blocking=True)
+            self.next_target = tuple(
+                target.cuda(non_blocking=True) for target in self.next_target
+            )
 
     def next(self):
         torch.cuda.current_stream().wait_stream(self.stream)
@@ -40,12 +41,10 @@ class DataPrefetcher:
         if input is not None:
             self.record_stream(input)
         if target is not None:
-            target[0].record_stream(torch.cuda.current_stream())
-            target[1].record_stream(torch.cuda.current_stream())
-            # target.record_stream(torch.cuda.current_stream())
+            for target_tensor in target:
+                target_tensor.record_stream(torch.cuda.current_stream())
         self.preload()
-        return input, (target[0], target[1])
-        # return input, target
+        return input, target
 
     def _input_cuda_for_image(self):
         self.next_input = self.next_input.cuda(non_blocking=True)
