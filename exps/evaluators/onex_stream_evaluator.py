@@ -166,6 +166,7 @@ class ONEX_COCOEvaluator:
 
     def convert_to_coco_format(self, outputs, info_imgs, ids):
         data_list = []
+        images = self.dataloader.dataset.coco.dataset["images"]
         for (output, img_h, img_w, img_id) in zip(
                 outputs, info_imgs[0], info_imgs[1], ids
         ):
@@ -187,24 +188,25 @@ class ONEX_COCOEvaluator:
 
             for ind in range(bboxes.shape[0]):
                 label = self.dataloader.dataset.class_ids[int(cls[ind])]
+                img_id_int = int(img_id)
 
-                if int(img_id) in [15060,15061]:
+                if img_id_int >= len(images) - 2:
                     continue
-                elif self.dataloader.dataset.coco.dataset['images'][int(img_id+1)]['fid'] == 0:
+                elif images[img_id_int + 1]['fid'] == 0:
                     continue
-                elif self.dataloader.dataset.coco.dataset['images'][int(img_id)]['fid'] == 0:
-                    idd = int(img_id)
+                elif images[img_id_int]['fid'] == 0:
+                    idd = img_id_int
                 else:
-                    idd = int(img_id + 1)
+                    idd = img_id_int + 1
 
-                    pred_data = {
-                        "image_id": idd,  
-                        "category_id": label,
-                        "bbox": bboxes[ind].numpy().tolist(),
-                        "score": scores[ind].numpy().item(),
-                        "segmentation": [],
-                    }  # COCO json format
-                    data_list.append(pred_data)
+                pred_data = {
+                    "image_id": idd,
+                    "category_id": label,
+                    "bbox": bboxes[ind].numpy().tolist(),
+                    "score": scores[ind].numpy().item(),
+                    "segmentation": [],
+                }
+                data_list.append(pred_data)
                     
         return data_list
 
@@ -250,11 +252,16 @@ class ONEX_COCOEvaluator:
                 
             try:
                 from yolox.layers import COCOeval_opt as COCOeval
-            except ImportError:
+
+                cocoEval = COCOeval(cocoGt, cocoDt, annType[1])
+            except Exception as exc:
+                logger.warning(
+                    "Falling back to pycocotools COCOeval because optimized COCOeval is unavailable: {}",
+                    exc,
+                )
                 from pycocotools.cocoeval import COCOeval
 
-
-            cocoEval = COCOeval(cocoGt, cocoDt, annType[1])
+                cocoEval = COCOeval(cocoGt, cocoDt, annType[1])
             cocoEval.evaluate()
             cocoEval.accumulate()
             redirect_string = io.StringIO()

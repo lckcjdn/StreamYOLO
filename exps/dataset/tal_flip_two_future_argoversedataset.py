@@ -271,7 +271,16 @@ class TWO_ARGOVERSEDataset(Dataset):
         img, support_img, target, support_target, img_info, img_id = self.pull_item(index)
 
         if self.preproc is not None:
-
-            img, support_img, target, support_target = self.preproc((img, support_img), (target, support_target), self.input_dim)
+            processed = self.preproc(
+                (img, support_img), (target, support_target), self.input_dim
+            )
+            if len(processed) == 4:
+                img, support_img, target, support_target = processed
+            elif len(processed) == 6:
+                img, support_img, target, support_target, _, _ = processed
+            else:
+                raise ValueError(
+                    f"Unexpected preproc output length: {len(processed)}"
+                )
 
         return np.concatenate((img, support_img), axis=0), (target, support_target), img_info, img_id

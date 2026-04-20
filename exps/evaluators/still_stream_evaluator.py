@@ -207,9 +207,18 @@ class STILL_COCOEvaluator:
                 json.dump(data_dict, open(tmp, "w"))
                 cocoDt = cocoGt.loadRes(tmp)
 
-            from yolox.layers import COCOeval_opt as COCOeval
+            try:
+                from yolox.layers import COCOeval_opt as COCOeval
 
-            cocoEval = COCOeval(cocoGt, cocoDt, annType[1])
+                cocoEval = COCOeval(cocoGt, cocoDt, annType[1])
+            except Exception as exc:
+                logger.warning(
+                    "Falling back to pycocotools COCOeval because optimized COCOeval is unavailable: {}",
+                    exc,
+                )
+                from pycocotools.cocoeval import COCOeval
+
+                cocoEval = COCOeval(cocoGt, cocoDt, annType[1])
             cocoEval.evaluate()
             cocoEval.accumulate()
             redirect_string = io.StringIO()

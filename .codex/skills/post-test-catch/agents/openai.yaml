@@ -1,0 +1,4 @@
+interface:
+  display_name: "Post-Test Catch"
+  short_description: "Commit tested changes, archive them, and sync the handoff into local Obsidian"
+  default_prompt: "Use $post-test-catch to commit a fully tested change, archive the latest commit under tmp/catch_<timestamp>, and record the handoff in the configured local Obsidian Catch notes."
