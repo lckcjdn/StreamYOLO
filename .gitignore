@@ -215,6 +215,8 @@ docs/api
 *.engine
 events.out.tfevents*
 tmp/
+.codex/config.toml
+/yolo26n.pt
 
 # vscode
 *.code-workspace
