@@ -31,9 +31,13 @@ class STILL_ARGOVERSEDataset(Dataset):
             debug (bool): if True, only one data id is selected from the dataset
         """
         super().__init__(img_size)
-        self.data_dir = data_dir
+        self.data_dir = os.path.abspath(os.path.expanduser(data_dir))
         self.json_file = json_file
-        self.coco = COCO(self.data_dir+'/Argoverse-HD/annotations/'+self.json_file)
+        self.annotation_file = os.path.join(
+            self.data_dir, "Argoverse-HD", "annotations", self.json_file
+        )
+        self.image_root = os.path.join(self.data_dir, "Argoverse-1.1", "tracking")
+        self.coco = COCO(self.annotation_file)
         self.ids = self.coco.getImgIds()
         self.seq_dirs = self.coco.dataset['seq_dirs']
         self.class_ids = sorted(self.coco.getCatIds())
@@ -138,7 +142,7 @@ class STILL_ARGOVERSEDataset(Dataset):
 
         img_info = (height, width)
         resized_info = (int(height * r), int(width * r))
-        file_name = os.path.join(self.data_dir, 'Argoverse-1.1', 'tracking', self.seq_dirs[im_sid], im_name)
+        file_name = os.path.join(self.image_root, self.seq_dirs[im_sid], im_name)
 
         return (res, img_info, resized_info, file_name)
 

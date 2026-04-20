@@ -27,10 +27,12 @@ class Exp(MyExp):
         self.eval_interval = 1
         self.train_ann = 'train.json'
         self.val_ann = 'val.json'
+        self.data_dir = os.environ.get("STREAMYOLO_ARGOVERSE_ROOT", "/data")
 
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
 
-        self.output_dir = '/data/output/stream_yolo'
+        repo_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+        self.output_dir = os.path.join(repo_root, 'outputs', 'streamyolo_argoverse')
 
     def get_model(self):
         from exps.model.yolox import YOLOX
@@ -67,7 +69,7 @@ class Exp(MyExp):
         )
 
         dataset = TWO_ARGOVERSEDataset(
-            data_dir='/data',
+            data_dir=self.data_dir,
             json_file=self.train_ann,
             name='train',
             img_size=self.input_size,
@@ -114,15 +116,15 @@ class Exp(MyExp):
         return train_loader
 
     def get_eval_loader(self, batch_size, is_distributed, testdev=False):
-        from exps.StreamYOLO.dataset.tal_flip_two_future_argoversedataset import TWO_ARGOVERSEDataset
-        from exps.StreamYOLO.data.data_augment_flip import DoubleTrainTransform
+        from exps.dataset.tal_flip_two_future_argoversedataset import TWO_ARGOVERSEDataset
+        from exps.data.data_augment_flip import DoubleValTransform
 
         valdataset = TWO_ARGOVERSEDataset(
-            data_dir='/data',
+            data_dir=self.data_dir,
             json_file='val.json',
             name='val',
             img_size=self.test_size,
-            preproc=DoubleTrainTransform(),
+            preproc=DoubleValTransform(),
         )
 
         if is_distributed:

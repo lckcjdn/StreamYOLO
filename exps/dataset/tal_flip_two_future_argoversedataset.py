@@ -31,9 +31,13 @@ class TWO_ARGOVERSEDataset(Dataset):
             debug (bool): if True, only one data id is selected from the dataset
         """
         super().__init__(img_size)
-        self.data_dir = data_dir
+        self.data_dir = os.path.abspath(os.path.expanduser(data_dir))
         self.json_file = json_file
-        self.coco = COCO(self.data_dir+'/Argoverse-HD/annotations/'+self.json_file)
+        self.annotation_file = os.path.join(
+            self.data_dir, "Argoverse-HD", "annotations", self.json_file
+        )
+        self.image_root = os.path.join(self.data_dir, "Argoverse-1.1", "tracking")
+        self.coco = COCO(self.annotation_file)
         self.ids = self.coco.getImgIds()
         self.seq_dirs = self.coco.dataset['seq_dirs']
         self.class_ids = sorted(self.coco.getCatIds())
@@ -151,8 +155,8 @@ class TWO_ARGOVERSEDataset(Dataset):
         img_info = (height, width)
         resized_info = (int(height * r), int(width * r))
 
-        file_name = os.path.join(self.data_dir, 'Argoverse-1.1', 'tracking', self.seq_dirs[im_sid], im_name)
-        support_file_name = os.path.join(self.data_dir, 'Argoverse-1.1', 'tracking', self.seq_dirs[im_sid_support], im_name_support)
+        file_name = os.path.join(self.image_root, self.seq_dirs[im_sid], im_name)
+        support_file_name = os.path.join(self.image_root, self.seq_dirs[im_sid_support], im_name_support)
 
     
 
@@ -183,7 +187,7 @@ class TWO_ARGOVERSEDataset(Dataset):
         support_r = min(self.img_size[0] / height, self.img_size[1] / width)
         support_res[:, :4] *= support_r
 
-        support_file_name = os.path.join(self.data_dir, 'Argoverse-1.1', 'tracking', self.seq_dirs[im_sid_support], im_name_support)
+        support_file_name = os.path.join(self.image_root, self.seq_dirs[im_sid_support], im_name_support)
 
         return (res, support_res, img_info, resized_info, file_name, support_file_name)
 
